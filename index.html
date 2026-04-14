@@ -1,180 +1,220 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>VisionOS Bonsai Weather App</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bonsai Weather</title>
+
+    <!-- A-Frame is used as a fallback for non-visionOS browsers.
+         On visionOS Safari we use the HTML <model> element, which
+         composites into the user's room via the spatial compositor.
+         WebXR immersive-ar is not supported on Vision Pro, so the
+         previous WebXR approach rendered as opaque black VR. -->
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
-    <script>
-      // 1. Hide the sky whenever we enter an immersive XR session
-      //    (Vision Pro Safari enters vr-mode; passthrough is the default blend)
-      AFRAME.registerComponent('hide-on-enter-xr', {
-        init: function () {
-          this.el.sceneEl.addEventListener('enter-vr', () => {
-            this.el.setAttribute('visible', 'false');
-          });
-          this.el.sceneEl.addEventListener('exit-vr', () => {
-            this.el.setAttribute('visible', 'true');
-          });
-        }
-      });
+    <style>
+      :root { color-scheme: light dark; font-family: -apple-system, system-ui, sans-serif; }
+      html, body { margin: 0; padding: 0; height: 100%; background: transparent; }
 
-      // 2. Particle System for Rain and Snow
-      AFRAME.registerComponent('weather-particles', {
-        schema: {
-          type: { type: 'string', default: 'rain' },
-          count: { type: 'int', default: 100 }
-        },
-        init: function() {
-          this.particles =[];
-          for (let i = 0; i < this.data.count; i++) {
-            let p = document.createElement('a-entity');
-            let isRain = this.data.type === 'rain';
-            
-            p.setAttribute('geometry', isRain ? 'primitive: box; width: 0.005; height: 0.04; depth: 0.005' : 'primitive: sphere; radius: 0.015');
-            p.setAttribute('material', isRain ? 'color: #4CC3D9; shader: flat; transparent: true; opacity: 0.7' : 'color: #FFFFFF; shader: flat');
-            
-            this.el.appendChild(p);
-            
-            this.particles.push({
-              el: p,
-              x: (Math.random() - 0.5) * 1.2,
-              y: Math.random() * 1.5 + 0.5,
-              z: (Math.random() - 0.5) * 1.2,
-              speed: isRain ? Math.random() * 0.04 + 0.03 : Math.random() * 0.005 + 0.005
-            });
-          }
-        },
-        tick: function() {
-          for (let i = 0; i < this.data.count; i++) {
-            let p = this.particles[i];
-            p.y -= p.speed;
-            if (p.y < 0) p.y = Math.random() * 0.5 + 1.5; 
-            p.el.setAttribute('position', `${p.x} ${p.y} ${p.z}`);
-          }
-        }
-      });
+      /* Spatial layout: on visionOS this whole page floats as a window.
+         Model is the hero; the forecast panel sits beside it. */
+      #stage {
+        display: grid;
+        grid-template-columns: 1fr 280px;
+        gap: 24px;
+        padding: 24px;
+        height: 100vh;
+        box-sizing: border-box;
+      }
 
-      // 3. Weather Manager to handle state
-      AFRAME.registerComponent('weather-manager', {
-        schema: { current: { type: 'string', default: 'sun' } },
-        update: function() {
-          const state = this.data.current;
-          document.getElementById('weather-sun').setAttribute('visible', 'false');
-          document.getElementById('weather-rain').setAttribute('visible', 'false');
-          document.getElementById('weather-snow').setAttribute('visible', 'false');
+      bonsai-model, model {
+        width: 100%;
+        height: 100%;
+        display: block;
+        background: transparent;
+      }
 
-          if (state === 'sun') {
-            document.getElementById('weather-sun').setAttribute('visible', 'true');
-          } else if (state === 'rain') {
-            document.getElementById('weather-rain').setAttribute('visible', 'true');
-          } else if (state === 'snow') {
-            document.getElementById('weather-snow').setAttribute('visible', 'true');
-          }
-        }
-      });
+      #panel {
+        align-self: center;
+        padding: 20px;
+        border-radius: 20px;
+        background: color-mix(in srgb, Canvas 80%, transparent);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+      }
+      #panel h1 { margin: 0 0 16px; font-size: 20px; font-weight: 600; }
+      .weather-btn {
+        display: block;
+        width: 100%;
+        margin: 8px 0;
+        padding: 14px 16px;
+        font-size: 16px;
+        border-radius: 12px;
+        border: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
+        background: color-mix(in srgb, Canvas 95%, CanvasText 5%);
+        color: CanvasText;
+        cursor: pointer;
+        transition: transform 0.12s, background 0.12s;
+      }
+      .weather-btn:hover { transform: scale(1.02); background: color-mix(in srgb, Canvas 85%, CanvasText 15%); }
+      .weather-btn[aria-pressed="true"] { background: SelectedItem; color: SelectedItemText; border-color: SelectedItem; }
 
-      // 4. UI Button Interaction mapping Vision Pro Gaze + Pinch
-      AFRAME.registerComponent('weather-button', {
-        schema: { type: 'string' },
-        init: function () {
-          this.el.addEventListener('click', () => {
-            document.getElementById('scene-manager').setAttribute('weather-manager', 'current', this.data);
-          });
-          
-          this.el.addEventListener('mouseenter', () => {
-            this.el.setAttribute('material', 'color', '#d3d3d3');
-            this.el.setAttribute('scale', '1.05 1.05 1.05');
-          });
-          this.el.addEventListener('mouseleave', () => {
-            this.el.setAttribute('material', 'color', '#ffffff');
-            this.el.setAttribute('scale', '1 1 1');
-          });
-        }
-      });
-    </script>
+      #fallback-notice {
+        padding: 16px;
+        border-radius: 12px;
+        background: color-mix(in srgb, Canvas 90%, CanvasText 10%);
+        font-size: 13px;
+        line-height: 1.4;
+        margin-top: 16px;
+      }
+
+      /* A-Frame fallback — only shown when <model> isn't supported */
+      #aframe-fallback { display: none; width: 100%; height: 100%; }
+      html:not(.supports-model) #aframe-fallback { display: block; }
+      html:not(.supports-model) #model-slot { display: none; }
+    </style>
   </head>
   <body>
-    <!-- Vision Pro Safari only exposes immersive-vr; passthrough is the
-         default environment blend. alpha:true lets the passthrough feed
-         show through instead of the renderer's clear color. -->
-    <a-scene
-      renderer="alpha: true; colorManagement: true; antialias: true"
-      background="transparent: true"
-      webxr="optionalFeatures: local-floor, bounded-floor, hand-tracking;"
-      xr-mode-ui="enterVREnabled: true; enterAREnabled: false">
+    <div id="stage">
+      <div id="model-slot">
+        <!-- visionOS 26+ renders this USDZ into the user's room.
+             Drop a bonsai.usdz at the repo root to populate it.
+             stagemode="orbit" lets the user pinch-rotate the model. -->
+        <model id="bonsai" stagemode="orbit" autoplay loop>
+          <source src="./bonsai.usdz" type="model/vnd.usdz+zip">
+          <img alt="Bonsai tree" src="./bonsai-fallback.jpg">
+        </model>
 
-      <!-- Sky is blue in 2D Safari, hidden on enter-vr so passthrough shows -->
-      <a-sky id="sky" color="#87CEEB" hide-on-enter-xr></a-sky>
-
-      <!-- STRICT VISION PRO INPUT: Maps eye-gaze and hand pinch directly -->
-      <a-entity cursor="rayOrigin: xr" raycaster="objects: .clickable"></a-entity>
-
-      <!-- Manage Weather State -->
-      <a-entity id="scene-manager" weather-manager="current: sun"></a-entity>
-
-      <!-- Lighting -->
-      <a-light type="ambient" color="#FFF" intensity="0.6"></a-light>
-      <a-light type="directional" color="#FFF" intensity="0.8" position="-1 2 1"></a-light>
-
-      <!-- Main Anchor (Places the experience 1.2 meters in front of you) -->
-      <a-entity position="0 0.8 -1.2">
-        
-        <!-- 3D BONSAI TREE -->
-        <a-entity id="bonsai-tree">
-          <a-cylinder radius="0.3" height="0.1" color="#2c3e50" position="0 0 0"></a-cylinder>
-          <a-cylinder radius="0.28" height="0.12" color="#34495e" position="0 0.02 0"></a-cylinder>
-          <a-cylinder radius="0.27" height="0.13" color="#3e2723" position="0 0.03 0"></a-cylinder>
-          <a-cylinder radius="0.04" height="0.5" color="#5d4037" position="0 0.25 0"></a-cylinder>
-          <a-cylinder radius="0.025" height="0.3" color="#5d4037" position="0.1 0.4 0" rotation="0 0 -45"></a-cylinder>
-          <a-sphere radius="0.25" color="#2e7d32" position="0 0.6 0" scale="1 0.6 1" material="roughness: 0.8"></a-sphere>
-          <a-sphere radius="0.2" color="#388e3c" position="0.18 0.5 0" scale="1 0.5 1" material="roughness: 0.8"></a-sphere>
-          <a-sphere radius="0.18" color="#2e7d32" position="-0.15 0.45 0" scale="1 0.5 1" material="roughness: 0.8"></a-sphere>
-        </a-entity>
-
-        <!-- WEATHER EFFECTS CONTAINER -->
-        <a-entity id="weather-container" position="0 1 0">
-          <a-entity id="weather-sun" visible="true">
-            <a-sphere radius="0.15" color="#FFD700" position="0.5 0.5 0" material="emissive: #FFD700; emissiveIntensity: 1; shader: flat"></a-sphere>
-            <a-light type="point" color="#FFD700" intensity="1.5" position="0.5 0.5 0"></a-light>
-          </a-entity>
-          <a-entity id="weather-rain" visible="false">
-            <a-entity position="0 0.6 0">
-              <a-sphere radius="0.2" color="#7f8c8d" position="0 0 0" material="shader: flat"></a-sphere>
-              <a-sphere radius="0.15" color="#7f8c8d" position="-0.15 -0.05 0.1" material="shader: flat"></a-sphere>
-              <a-sphere radius="0.18" color="#7f8c8d" position="0.15 -0.02 -0.05" material="shader: flat"></a-sphere>
+        <!-- A-Frame fallback for browsers without <model> support -->
+        <div id="aframe-fallback">
+          <a-scene embedded renderer="colorManagement: true; antialias: true">
+            <a-sky color="#87CEEB"></a-sky>
+            <a-light type="ambient" color="#FFF" intensity="0.6"></a-light>
+            <a-light type="directional" color="#FFF" intensity="0.8" position="-1 2 1"></a-light>
+            <a-entity position="0 0.8 -1.2">
+              <a-entity id="bonsai-primitive">
+                <a-cylinder radius="0.3" height="0.1" color="#2c3e50"></a-cylinder>
+                <a-cylinder radius="0.28" height="0.12" color="#34495e" position="0 0.02 0"></a-cylinder>
+                <a-cylinder radius="0.27" height="0.13" color="#3e2723" position="0 0.03 0"></a-cylinder>
+                <a-cylinder radius="0.04" height="0.5" color="#5d4037" position="0 0.25 0"></a-cylinder>
+                <a-cylinder radius="0.025" height="0.3" color="#5d4037" position="0.1 0.4 0" rotation="0 0 -45"></a-cylinder>
+                <a-sphere radius="0.25" color="#2e7d32" position="0 0.6 0" scale="1 0.6 1"></a-sphere>
+                <a-sphere radius="0.2" color="#388e3c" position="0.18 0.5 0" scale="1 0.5 1"></a-sphere>
+                <a-sphere radius="0.18" color="#2e7d32" position="-0.15 0.45 0" scale="1 0.5 1"></a-sphere>
+              </a-entity>
+              <a-entity id="weather-container" position="0 1 0">
+                <a-entity id="weather-sun" visible="true">
+                  <a-sphere radius="0.15" color="#FFD700" position="0.5 0.5 0" material="emissive: #FFD700; emissiveIntensity: 1; shader: flat"></a-sphere>
+                </a-entity>
+                <a-entity id="weather-rain" visible="false">
+                  <a-sphere radius="0.2" color="#7f8c8d" position="0 0.6 0" material="shader: flat"></a-sphere>
+                  <a-entity weather-particles="type: rain; count: 80"></a-entity>
+                </a-entity>
+                <a-entity id="weather-snow" visible="false">
+                  <a-sphere radius="0.2" color="#ffffff" position="0 0.6 0" material="shader: flat"></a-sphere>
+                  <a-entity weather-particles="type: snow; count: 60"></a-entity>
+                </a-entity>
+              </a-entity>
             </a-entity>
-            <a-entity weather-particles="type: rain; count: 80"></a-entity>
-          </a-entity>
-          <a-entity id="weather-snow" visible="false">
-            <a-entity position="0 0.6 0">
-              <a-sphere radius="0.2" color="#ffffff" position="0 0 0" material="shader: flat"></a-sphere>
-              <a-sphere radius="0.15" color="#ffffff" position="-0.15 -0.05 0.1" material="shader: flat"></a-sphere>
-              <a-sphere radius="0.18" color="#ffffff" position="0.15 -0.02 -0.05" material="shader: flat"></a-sphere>
-            </a-entity>
-            <a-entity weather-particles="type: snow; count: 60"></a-entity>
-          </a-entity>
-        </a-entity>
+          </a-scene>
+        </div>
+      </div>
 
-        <!-- FLOATING UI DASHBOARD -->
-        <a-entity position="-0.6 0.5 0" rotation="0 15 0">
-          <a-plane width="0.4" height="0.6" color="#2c3e50" material="opacity: 0.8; transparent: true" position="0 0 -0.01" rounded="radius: 0.05"></a-plane>
-          <a-text value="Forecast" color="#FFF" align="center" position="0 0.22 0" scale="0.4 0.4 0.4"></a-text>
+      <aside id="panel">
+        <h1>Forecast</h1>
+        <button class="weather-btn" data-weather="sun" aria-pressed="true">☀︎ Sunny</button>
+        <button class="weather-btn" data-weather="rain" aria-pressed="false">☂ Rainy</button>
+        <button class="weather-btn" data-weather="snow" aria-pressed="false">❄ Snowy</button>
+        <div id="fallback-notice" hidden>
+          Drop a <code>bonsai.usdz</code> next to <code>index.html</code> to see the spatial bonsai. On visionOS 26+ it will float in your room.
+        </div>
+      </aside>
+    </div>
 
-          <a-plane class="clickable" weather-button="sun" width="0.25" height="0.08" color="#ffffff" position="0 0.08 0.01">
-            <a-text value="Sunny" color="#333" align="center" scale="0.3 0.3 0.3"></a-text>
-          </a-plane>
+    <script>
+      // Feature-detect the <model> element. HTMLModelElement exists on
+      // visionOS 26+ Safari; elsewhere the element falls back to <img>.
+      const supportsModel = typeof HTMLModelElement !== 'undefined';
+      if (supportsModel) document.documentElement.classList.add('supports-model');
 
-          <a-plane class="clickable" weather-button="rain" width="0.25" height="0.08" color="#ffffff" position="0 -0.04 0.01">
-            <a-text value="Rainy" color="#333" align="center" scale="0.3 0.3 0.3"></a-text>
-          </a-plane>
+      // Surface a hint when the USDZ 404s so the user knows what to do.
+      const bonsai = document.getElementById('bonsai');
+      const notice = document.getElementById('fallback-notice');
+      if (bonsai && 'ready' in bonsai) {
+        bonsai.ready.catch(() => { if (notice) notice.hidden = false; });
+      } else if (!supportsModel) {
+        // Not visionOS — hide the notice; A-Frame fallback is already visible.
+      }
 
-          <a-plane class="clickable" weather-button="snow" width="0.25" height="0.08" color="#ffffff" position="0 -0.16 0.01">
-            <a-text value="Snowy" color="#333" align="center" scale="0.3 0.3 0.3"></a-text>
-          </a-plane>
-        </a-entity>
+      // Weather state — drives both the <model> variant and the A-Frame fallback.
+      const state = { current: 'sun' };
 
-      </a-entity>
-    </a-scene>
+      function setWeather(next) {
+        state.current = next;
+        document.querySelectorAll('.weather-btn').forEach(b => {
+          b.setAttribute('aria-pressed', b.dataset.weather === next ? 'true' : 'false');
+        });
+
+        // <model>: swap to a per-weather USDZ variant if present.
+        // Authoring tip: export bonsai-sun.usdz / bonsai-rain.usdz / bonsai-snow.usdz
+        // from Reality Composer Pro with matching animation timelines.
+        if (supportsModel && bonsai) {
+          const source = bonsai.querySelector('source');
+          if (source) {
+            const variant = `./bonsai-${next}.usdz`;
+            // Only swap if the variant file exists — otherwise keep the base.
+            fetch(variant, { method: 'HEAD' }).then(r => {
+              if (r.ok) { source.src = variant; bonsai.load?.(); }
+            }).catch(() => {});
+          }
+        }
+
+        // A-Frame fallback: toggle visibility of weather groups.
+        ['sun', 'rain', 'snow'].forEach(w => {
+          const el = document.getElementById(`weather-${w}`);
+          if (el) el.setAttribute('visible', String(w === next));
+        });
+      }
+
+      document.querySelectorAll('.weather-btn').forEach(btn => {
+        btn.addEventListener('click', () => setWeather(btn.dataset.weather));
+      });
+
+      // A-Frame particle system used only in the fallback path.
+      if (window.AFRAME) {
+        AFRAME.registerComponent('weather-particles', {
+          schema: { type: { type: 'string', default: 'rain' }, count: { type: 'int', default: 100 } },
+          init() {
+            this.particles = [];
+            const isRain = this.data.type === 'rain';
+            for (let i = 0; i < this.data.count; i++) {
+              const p = document.createElement('a-entity');
+              p.setAttribute('geometry', isRain
+                ? 'primitive: box; width: 0.005; height: 0.04; depth: 0.005'
+                : 'primitive: sphere; radius: 0.015');
+              p.setAttribute('material', isRain
+                ? 'color: #4CC3D9; shader: flat; transparent: true; opacity: 0.7'
+                : 'color: #FFFFFF; shader: flat');
+              this.el.appendChild(p);
+              this.particles.push({
+                el: p,
+                x: (Math.random() - 0.5) * 1.2,
+                y: Math.random() * 1.5 + 0.5,
+                z: (Math.random() - 0.5) * 1.2,
+                speed: isRain ? Math.random() * 0.04 + 0.03 : Math.random() * 0.005 + 0.005
+              });
+            }
+          },
+          tick() {
+            for (const p of this.particles) {
+              p.y -= p.speed;
+              if (p.y < 0) p.y = Math.random() * 0.5 + 1.5;
+              p.el.setAttribute('position', `${p.x} ${p.y} ${p.z}`);
+            }
+          }
+        });
+      }
+    </script>
   </body>
 </html>
