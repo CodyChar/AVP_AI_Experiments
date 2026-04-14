@@ -155,9 +155,17 @@
             <!-- Floating dust motes that catch the sun -->
             <a-entity dust-field="count: 700; radius: 4"></a-entity>
 
-            <!-- Camera rig, positioned as the viewer stands in the garden -->
-            <a-entity id="rig" position="0 1.6 0.5">
-              <a-camera wasd-controls-enabled="true" look-controls="pointerLockEnabled: false"></a-camera>
+            <!-- Fixed diorama camera for the inline 2D view. A-Frame's
+                 default look-controls subscribes to device-orientation
+                 events, which Vision Pro Safari fires with head pose
+                 data even in windowed mode — so we disable it. Inside
+                 a WebXR session, three.js WebXRManager drives the
+                 camera directly and look-controls is bypassed. -->
+            <a-entity id="rig" position="0 1.45 0.9">
+              <a-camera
+                look-controls="enabled: false"
+                wasd-controls-enabled="false"
+                rotation="-8 0 0"></a-camera>
             </a-entity>
 
             <!-- In-XR forecast panel — reachable by gaze/pinch -->
@@ -200,7 +208,7 @@
           Drop a <code>bonsai.usdz</code> next to <code>index.html</code> to see the spatial bonsai on visionOS.
         </div>
 
-        <div id="build-stamp">Build 2026-04-14 18:55 UTC</div>
+        <div id="build-stamp">Build 2026-04-14 19:00 UTC</div>
       </aside>
     </div>
 
