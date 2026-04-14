@@ -5,19 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Bonsai Weather</title>
 
-    <!-- A-Frame is used as a fallback for non-visionOS browsers.
-         On visionOS Safari we use the HTML <model> element, which
-         composites into the user's room via the spatial compositor.
-         WebXR immersive-ar is not supported on Vision Pro, so the
-         previous WebXR approach rendered as opaque black VR. -->
+    <!-- Two rendering paths:
+         1) HTML <model> + AR Quick Look — places the USDZ bonsai on the
+            user's real desk via visionOS's spatial compositor.
+         2) A-Frame (three.js) WebXR — "Enter Garden" button launches an
+            opaque immersive-vr session with shader-driven god rays,
+            bloom, dust particles, and shadows. WebXR on Vision Pro is
+            always opaque; the garden is designed as a cinematic world,
+            not an AR overlay. -->
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
     <style>
       :root { color-scheme: light dark; font-family: -apple-system, system-ui, sans-serif; }
       html, body { margin: 0; padding: 0; height: 100%; background: transparent; }
 
-      /* Spatial layout: on visionOS this whole page floats as a window.
-         Model is the hero; the forecast panel sits beside it. */
       #stage {
         display: grid;
         grid-template-columns: 1fr 280px;
@@ -27,12 +28,7 @@
         box-sizing: border-box;
       }
 
-      bonsai-model, model {
-        width: 100%;
-        height: 100%;
-        display: block;
-        background: transparent;
-      }
+      model { width: 100%; height: 100%; display: block; background: transparent; }
 
       #panel {
         align-self: center;
@@ -56,67 +52,129 @@
         color: CanvasText;
         cursor: pointer;
         transition: transform 0.12s, background 0.12s;
+        text-decoration: none;
+        text-align: left;
       }
       .weather-btn:hover { transform: scale(1.02); background: color-mix(in srgb, Canvas 85%, CanvasText 15%); }
       .weather-btn[aria-pressed="true"] { background: SelectedItem; color: SelectedItemText; border-color: SelectedItem; }
+      #enter-garden { background: linear-gradient(135deg, #7a5cff 0%, #2aa4ff 100%); color: #fff; border: none; }
+      #enter-garden:hover { filter: brightness(1.1); }
 
-      #fallback-notice {
-        padding: 16px;
-        border-radius: 12px;
-        background: color-mix(in srgb, Canvas 90%, CanvasText 10%);
-        font-size: 13px;
-        line-height: 1.4;
+      #build-stamp {
         margin-top: 16px;
+        font-size: 11px;
+        opacity: 0.6;
+        font-family: ui-monospace, Menlo, monospace;
       }
 
-      /* A-Frame fallback — only shown when <model> isn't supported */
-      #aframe-fallback { display: none; width: 100%; height: 100%; }
-      html:not(.supports-model) #aframe-fallback { display: block; }
-      html:not(.supports-model) #model-slot { display: none; }
+      #fallback-notice {
+        padding: 16px; border-radius: 12px;
+        background: color-mix(in srgb, Canvas 90%, CanvasText 10%);
+        font-size: 13px; line-height: 1.4; margin-top: 16px;
+      }
+
+      /* A-Frame scene lives in the DOM for WebXR, but is hidden when
+         <model> is available (Vision Pro). On non-model browsers, the
+         scene becomes the inline preview. */
+      #garden-scene-wrap { width: 100%; height: 100%; }
+      html.supports-model #garden-scene-wrap { display: none; }
+      html:not(.supports-model) #model-slot > model { display: none; }
     </style>
   </head>
   <body>
     <div id="stage">
       <div id="model-slot">
-        <!-- visionOS 26+ renders this USDZ into the user's room.
-             Drop a bonsai.usdz at the repo root to populate it.
-             stagemode="orbit" lets the user pinch-rotate the model. -->
         <model id="bonsai" stagemode="orbit" autoplay loop>
           <source src="./bonsai.usdz" type="model/vnd.usdz+zip">
           <img alt="Bonsai tree" src="./bonsai-fallback.jpg">
         </model>
 
-        <!-- A-Frame fallback for browsers without <model> support -->
-        <div id="aframe-fallback">
-          <a-scene embedded renderer="colorManagement: true; antialias: true">
-            <a-sky color="#87CEEB"></a-sky>
-            <a-light type="ambient" color="#FFF" intensity="0.6"></a-light>
-            <a-light type="directional" color="#FFF" intensity="0.8" position="-1 2 1"></a-light>
-            <a-entity position="0 0.8 -1.2">
-              <a-entity id="bonsai-primitive">
-                <a-cylinder radius="0.3" height="0.1" color="#2c3e50"></a-cylinder>
-                <a-cylinder radius="0.28" height="0.12" color="#34495e" position="0 0.02 0"></a-cylinder>
-                <a-cylinder radius="0.27" height="0.13" color="#3e2723" position="0 0.03 0"></a-cylinder>
-                <a-cylinder radius="0.04" height="0.5" color="#5d4037" position="0 0.25 0"></a-cylinder>
-                <a-cylinder radius="0.025" height="0.3" color="#5d4037" position="0.1 0.4 0" rotation="0 0 -45"></a-cylinder>
-                <a-sphere radius="0.25" color="#2e7d32" position="0 0.6 0" scale="1 0.6 1"></a-sphere>
-                <a-sphere radius="0.2" color="#388e3c" position="0.18 0.5 0" scale="1 0.5 1"></a-sphere>
-                <a-sphere radius="0.18" color="#2e7d32" position="-0.15 0.45 0" scale="1 0.5 1"></a-sphere>
+        <div id="garden-scene-wrap">
+          <a-scene
+            id="garden-scene"
+            embedded
+            renderer-tuning
+            renderer="colorManagement: true; physicallyCorrectLights: true; toneMapping: ACESFilmic; antialias: true; foveationLevel: 1; highRefreshRate: true"
+            fog="type: exponential; color: #b8a88e; density: 0.035"
+            xr-mode-ui="enterVREnabled: false; enterAREnabled: false"
+            background="color: #1e1a24"
+          >
+            <a-assets timeout="10000">
+              <a-asset-item id="bonsai-glb" src="./bonsai.glb"></a-asset-item>
+            </a-assets>
+
+            <!-- Sun + directional shadow light + billboard + halo -->
+            <a-entity sun-rig></a-entity>
+
+            <!-- Fill lights so shadow side doesn't go pure black -->
+            <a-light type="hemisphere" color="#fff2d0" ground-color="#2a2118" intensity="0.35"></a-light>
+            <a-light type="ambient" color="#6a7a90" intensity="0.18"></a-light>
+
+            <!-- Gradient sky — warm horizon into deep blue zenith -->
+            <a-entity gradient-sky="top: #3a4f78; bottom: #e7b77a"></a-entity>
+
+            <!-- Ground with radial fade to sky -->
+            <a-entity ground-plane></a-entity>
+
+            <!-- Pedestal -->
+            <a-cylinder
+              radius="0.5" height="0.2"
+              position="0 0.1 -1.5"
+              material="color: #4a3728; roughness: 0.85; metalness: 0.05"
+              shadow="receive: true; cast: true"></a-cylinder>
+
+            <!-- Tree (GLB) with primitive fallback if asset missing -->
+            <a-entity id="tree-mount" position="0 0.2 -1.5" scale="0.8 0.8 0.8">
+              <a-entity
+                id="tree-glb"
+                gltf-model="#bonsai-glb"
+                shadow="cast: true; receive: true"
+                tree-loader></a-entity>
+
+              <a-entity id="tree-primitive" visible="false">
+                <a-cylinder radius="0.27" height="0.13" color="#3e2723" material="roughness: 0.9"></a-cylinder>
+                <a-cylinder radius="0.04" height="0.5" color="#5d4037" position="0 0.25 0" material="roughness: 0.85"></a-cylinder>
+                <a-cylinder radius="0.025" height="0.3" color="#5d4037" position="0.1 0.4 0" rotation="0 0 -45" material="roughness: 0.85"></a-cylinder>
+                <a-sphere radius="0.25" color="#2e7d32" position="0 0.6 0" scale="1 0.6 1" material="roughness: 0.8"></a-sphere>
+                <a-sphere radius="0.2" color="#388e3c" position="0.18 0.5 0" scale="1 0.5 1" material="roughness: 0.8"></a-sphere>
+                <a-sphere radius="0.18" color="#2e7d32" position="-0.15 0.45 0" scale="1 0.5 1" material="roughness: 0.8"></a-sphere>
               </a-entity>
-              <a-entity id="weather-container" position="0 1 0">
-                <a-entity id="weather-sun" visible="true">
-                  <a-sphere radius="0.15" color="#FFD700" position="0.5 0.5 0" material="emissive: #FFD700; emissiveIntensity: 1; shader: flat"></a-sphere>
-                </a-entity>
-                <a-entity id="weather-rain" visible="false">
-                  <a-sphere radius="0.2" color="#7f8c8d" position="0 0.6 0" material="shader: flat"></a-sphere>
-                  <a-entity weather-particles="type: rain; count: 80"></a-entity>
-                </a-entity>
-                <a-entity id="weather-snow" visible="false">
-                  <a-sphere radius="0.2" color="#ffffff" position="0 0.6 0" material="shader: flat"></a-sphere>
-                  <a-entity weather-particles="type: snow; count: 60"></a-entity>
-                </a-entity>
-              </a-entity>
+
+              <!-- Bloom sprites tucked into the canopy -->
+              <a-entity bloom-sprite="size: 0.4" position="0  0.7  0.1"></a-entity>
+              <a-entity bloom-sprite="size: 0.3" position="0.15 0.55 0"></a-entity>
+              <a-entity bloom-sprite="size: 0.35" position="-0.1 0.6 -0.1"></a-entity>
+              <a-entity bloom-sprite="size: 0.25" position="0.05 0.75 -0.05"></a-entity>
             </a-entity>
+
+            <!-- Volumetric light shafts fanning from the sun -->
+            <a-entity god-rays="count: 32" position="0 1.2 -1.5"></a-entity>
+
+            <!-- Floating dust motes that catch the sun -->
+            <a-entity dust-field="count: 700; radius: 4"></a-entity>
+
+            <!-- Camera rig, positioned as the viewer stands in the garden -->
+            <a-entity id="rig" position="0 1.6 0.5">
+              <a-camera wasd-controls-enabled="true" look-controls="pointerLockEnabled: false"></a-camera>
+            </a-entity>
+
+            <!-- In-XR forecast panel — reachable by gaze/pinch -->
+            <a-entity id="xr-panel" position="0.9 1.3 -1.3" rotation="0 -30 0">
+              <a-plane width="0.45" height="0.6" color="#1a1220" material="opacity: 0.75; transparent: true" position="0 0 -0.005"></a-plane>
+              <a-text value="Forecast" color="#fff" align="center" position="0 0.22 0" scale="0.45 0.45 0.45"></a-text>
+              <a-plane class="xr-clickable" data-weather="sun"  width="0.3" height="0.08" color="#f7d872" position="0 0.08 0.01">
+                <a-text value="Sunny" color="#111" align="center" scale="0.3 0.3 0.3"></a-text>
+              </a-plane>
+              <a-plane class="xr-clickable" data-weather="rain" width="0.3" height="0.08" color="#8cb3d9" position="0 -0.04 0.01">
+                <a-text value="Rainy" color="#111" align="center" scale="0.3 0.3 0.3"></a-text>
+              </a-plane>
+              <a-plane class="xr-clickable" data-weather="snow" width="0.3" height="0.08" color="#e8eef5" position="0 -0.16 0.01">
+                <a-text value="Snowy" color="#111" align="center" scale="0.3 0.3 0.3"></a-text>
+              </a-plane>
+            </a-entity>
+
+            <!-- Gaze + pinch cursor for XR -->
+            <a-entity cursor="rayOrigin: xr" raycaster="objects: .xr-clickable"></a-entity>
           </a-scene>
         </div>
       </div>
@@ -127,105 +185,467 @@
         <button class="weather-btn" data-weather="rain" aria-pressed="false">☂ Rainy</button>
         <button class="weather-btn" data-weather="snow" aria-pressed="false">❄ Snowy</button>
 
-        <!-- AR Quick Look: tapping opens the USDZ in visionOS's system
-             3D viewer, letting the user place it on a real surface.
-             The href is kept in sync with the current weather variant. -->
         <a id="place-in-room" class="weather-btn" rel="ar" href="./bonsai.usdz">
           <img alt="" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg'/>" style="display:none">
           Place in your room
         </a>
 
+        <button id="enter-garden" class="weather-btn" hidden>
+          Enter the Garden
+        </button>
+
         <div id="fallback-notice" hidden>
-          Drop a <code>bonsai.usdz</code> next to <code>index.html</code> to see the spatial bonsai. On visionOS 26+ it will float in your room.
+          Drop a <code>bonsai.usdz</code> next to <code>index.html</code> to see the spatial bonsai on visionOS.
         </div>
+
+        <div id="build-stamp">Build 2026-04-14 18:21 UTC</div>
       </aside>
     </div>
 
     <script>
-      // Feature-detect the <model> element. HTMLModelElement exists on
-      // visionOS 26+ Safari; elsewhere the element falls back to <img>.
+      // ---- feature detect <model> ----
       const supportsModel = typeof HTMLModelElement !== 'undefined';
       if (supportsModel) document.documentElement.classList.add('supports-model');
 
-      // Surface a hint when the USDZ 404s so the user knows what to do.
-      const bonsai = document.getElementById('bonsai');
+      const bonsaiModel = document.getElementById('bonsai');
       const notice = document.getElementById('fallback-notice');
-      if (bonsai && 'ready' in bonsai) {
-        bonsai.ready.catch(() => { if (notice) notice.hidden = false; });
-      } else if (!supportsModel) {
-        // Not visionOS — hide the notice; A-Frame fallback is already visible.
+      if (bonsaiModel && 'ready' in bonsaiModel) {
+        bonsaiModel.ready.catch(() => { if (notice) notice.hidden = false; });
       }
 
-      // Weather state — drives both the <model> variant and the A-Frame fallback.
+      // ---- weather state, drives <model>, AR QL href, and WebXR scene ----
       const state = { current: 'sun' };
+      const sceneEl = () => document.getElementById('garden-scene');
 
       function setWeather(next) {
         state.current = next;
         document.querySelectorAll('.weather-btn').forEach(b => {
-          b.setAttribute('aria-pressed', b.dataset.weather === next ? 'true' : 'false');
+          if (b.dataset.weather) b.setAttribute('aria-pressed', b.dataset.weather === next ? 'true' : 'false');
         });
 
-        // Point AR Quick Look at the base bonsai; will upgrade to the
-        // weather variant below if it exists on the server.
+        // AR Quick Look href
         const placeLink = document.getElementById('place-in-room');
         if (placeLink) placeLink.href = './bonsai.usdz';
 
-        // <model>: swap to a per-weather USDZ variant if present.
-        // Authoring tip: export bonsai-sun.usdz / bonsai-rain.usdz / bonsai-snow.usdz
-        // from Reality Composer Pro with matching animation timelines.
-        const variant = `./bonsai-${next}.usdz`;
-        fetch(variant, { method: 'HEAD' }).then(r => {
+        // Per-weather USDZ variant (for <model> + AR QL)
+        const usdzVariant = `./bonsai-${next}.usdz`;
+        fetch(usdzVariant, { method: 'HEAD' }).then(r => {
           if (!r.ok) return;
-          if (placeLink) placeLink.href = variant;
-          if (supportsModel && bonsai) {
-            const source = bonsai.querySelector('source');
-            if (source) { source.src = variant; bonsai.load?.(); }
+          if (placeLink) placeLink.href = usdzVariant;
+          if (supportsModel && bonsaiModel) {
+            const source = bonsaiModel.querySelector('source');
+            if (source) { source.src = usdzVariant; bonsaiModel.load?.(); }
           }
         }).catch(() => {});
 
-        // A-Frame fallback: toggle visibility of weather groups.
-        ['sun', 'rain', 'snow'].forEach(w => {
-          const el = document.getElementById(`weather-${w}`);
-          if (el) el.setAttribute('visible', String(w === next));
-        });
+        // Per-weather GLB variant (for WebXR scene)
+        const glbVariant = `./bonsai-${next}.glb`;
+        const treeGlb = document.getElementById('tree-glb');
+        if (treeGlb) {
+          fetch(glbVariant, { method: 'HEAD' }).then(r => {
+            const src = r.ok ? glbVariant : './bonsai.glb';
+            treeGlb.setAttribute('gltf-model', src);
+          }).catch(() => treeGlb.setAttribute('gltf-model', './bonsai.glb'));
+        }
+
+        // Sun mood + environment tint
+        const s = sceneEl();
+        if (s && s.hasLoaded) s.emit('weatherchanged', { weather: next });
       }
 
-      document.querySelectorAll('.weather-btn').forEach(btn => {
+      document.querySelectorAll('#panel .weather-btn[data-weather]').forEach(btn => {
         btn.addEventListener('click', () => setWeather(btn.dataset.weather));
       });
 
-      // A-Frame particle system used only in the fallback path.
+      // ---- "Enter the Garden" button — only show if WebXR immersive-vr is supported ----
+      const enterBtn = document.getElementById('enter-garden');
+      (async () => {
+        if (!('xr' in navigator)) return;
+        try {
+          const ok = await navigator.xr.isSessionSupported('immersive-vr');
+          if (ok) enterBtn.hidden = false;
+        } catch {}
+      })();
+      enterBtn.addEventListener('click', () => {
+        const s = sceneEl();
+        if (s && s.enterVR) s.enterVR();
+      });
+
+      // ================== A-Frame components ==================
       if (window.AFRAME) {
-        AFRAME.registerComponent('weather-particles', {
-          schema: { type: { type: 'string', default: 'rain' }, count: { type: 'int', default: 100 } },
+        const THREE = AFRAME.THREE;
+
+        // --- renderer tuning: foveation + quality tier on XR session start ---
+        AFRAME.registerComponent('renderer-tuning', {
           init() {
-            this.particles = [];
-            const isRain = this.data.type === 'rain';
-            for (let i = 0; i < this.data.count; i++) {
-              const p = document.createElement('a-entity');
-              p.setAttribute('geometry', isRain
-                ? 'primitive: box; width: 0.005; height: 0.04; depth: 0.005'
-                : 'primitive: sphere; radius: 0.015');
-              p.setAttribute('material', isRain
-                ? 'color: #4CC3D9; shader: flat; transparent: true; opacity: 0.7'
-                : 'color: #FFFFFF; shader: flat');
-              this.el.appendChild(p);
-              this.particles.push({
-                el: p,
-                x: (Math.random() - 0.5) * 1.2,
-                y: Math.random() * 1.5 + 0.5,
-                z: (Math.random() - 0.5) * 1.2,
-                speed: isRain ? Math.random() * 0.04 + 0.03 : Math.random() * 0.005 + 0.005
-              });
-            }
+            const scene = this.el;
+            const isVisionPro = /visionOS|AppleWebKit.*XR/i.test(navigator.userAgent);
+            scene.addEventListener('loaded', () => {
+              const r = scene.renderer;
+              if (!r) return;
+              r.shadowMap.enabled = true;
+              r.shadowMap.type = THREE.PCFSoftShadowMap;
+              r.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+            });
+            scene.addEventListener('enter-vr', () => {
+              try { scene.renderer.xr.setFoveation?.(0.6); } catch {}
+              scene.dataset.quality = isVisionPro ? 'xr' : 'high';
+            });
+          }
+        });
+
+        // --- gradient sky on inverted sphere ---
+        AFRAME.registerComponent('gradient-sky', {
+          schema: {
+            top: { type: 'color', default: '#3a4f78' },
+            bottom: { type: 'color', default: '#e7b77a' }
+          },
+          init() {
+            this.mat = new THREE.ShaderMaterial({
+              side: THREE.BackSide,
+              depthWrite: false,
+              uniforms: {
+                uTop: { value: new THREE.Color(this.data.top) },
+                uBottom: { value: new THREE.Color(this.data.bottom) }
+              },
+              vertexShader: `
+                varying vec3 vDir;
+                void main() {
+                  vDir = normalize(position);
+                  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }`,
+              fragmentShader: `
+                varying vec3 vDir;
+                uniform vec3 uTop;
+                uniform vec3 uBottom;
+                void main() {
+                  float h = clamp(vDir.y * 0.5 + 0.5, 0.0, 1.0);
+                  h = pow(h, 0.55);
+                  gl_FragColor = vec4(mix(uBottom, uTop, h), 1.0);
+                }`
+            });
+            const mesh = new THREE.Mesh(new THREE.SphereGeometry(500, 32, 16), this.mat);
+            mesh.renderOrder = -1;
+            this.el.setObject3D('sky', mesh);
+          },
+          tint(top, bottom) {
+            this.mat.uniforms.uTop.value.set(top);
+            this.mat.uniforms.uBottom.value.set(bottom);
+          }
+        });
+
+        // --- ground plane with radial fade via onBeforeCompile ---
+        AFRAME.registerComponent('ground-plane', {
+          init() {
+            const mat = new THREE.MeshStandardMaterial({
+              color: 0x3a2f24, roughness: 0.92, metalness: 0.0
+            });
+            mat.onBeforeCompile = (shader) => {
+              shader.vertexShader = shader.vertexShader
+                .replace('#include <common>', '#include <common>\nvarying vec2 vLocalXZ;')
+                .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLocalXZ = position.xy;');
+              shader.fragmentShader = shader.fragmentShader
+                .replace('#include <common>', '#include <common>\nvarying vec2 vLocalXZ;')
+                .replace(
+                  '#include <output_fragment>',
+                  `
+                  float d = length(vLocalXZ) / 20.0;
+                  float a = 1.0 - smoothstep(0.65, 1.0, d);
+                  gl_FragColor.a *= a;
+                  #include <output_fragment>
+                  `
+                );
+            };
+            mat.transparent = true;
+            const geo = new THREE.CircleGeometry(20, 64);
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.rotation.x = -Math.PI / 2;
+            mesh.receiveShadow = true;
+            this.el.setObject3D('ground', mesh);
+          }
+        });
+
+        // --- sun rig: directional shadow light + billboard disk + halo ---
+        AFRAME.registerComponent('sun-rig', {
+          schema: {
+            dir: { type: 'vec3', default: { x: -0.35, y: 0.65, z: -0.8 } },
+            color: { type: 'color', default: '#ffd7a0' },
+            intensity: { type: 'number', default: 3.0 }
+          },
+          init() {
+            const dir = new THREE.Vector3(this.data.dir.x, this.data.dir.y, this.data.dir.z).normalize();
+            const group = new THREE.Group();
+            this.el.setObject3D('sunrig', group);
+
+            const light = new THREE.DirectionalLight(this.data.color, this.data.intensity);
+            light.position.copy(dir).multiplyScalar(6);
+            light.castShadow = true;
+            light.shadow.mapSize.set(1024, 1024);
+            light.shadow.camera.near = 0.1;
+            light.shadow.camera.far = 25;
+            const s = 5;
+            light.shadow.camera.left = -s;
+            light.shadow.camera.right = s;
+            light.shadow.camera.top = s;
+            light.shadow.camera.bottom = -s;
+            light.shadow.bias = -0.0005;
+            light.shadow.radius = 4;
+            group.add(light);
+            group.add(light.target);
+            this.light = light;
+
+            const sunTex = this._radial('#fffbe0', 'rgba(255,160,60,0)', 256);
+            const sun = new THREE.Mesh(
+              new THREE.PlaneGeometry(1.6, 1.6),
+              new THREE.MeshBasicMaterial({ map: sunTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending })
+            );
+            sun.position.copy(dir).multiplyScalar(22);
+            group.add(sun);
+            this.sun = sun;
+
+            const haloTex = this._radial('rgba(255,200,130,0.55)', 'rgba(255,120,40,0)', 256);
+            const haloMat = () => new THREE.MeshBasicMaterial({ map: haloTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+            const h1 = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), haloMat()); h1.material.opacity = 0.85; sun.add(h1);
+            const h2 = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), haloMat()); h2.material.opacity = 0.45; sun.add(h2);
+            const h3 = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), haloMat()); h3.material.opacity = 0.18; sun.add(h3);
+
+            // publish sun direction for other components
+            this.el.sceneEl.sunDir = dir;
+          },
+          _radial(inner, outer, size) {
+            const c = document.createElement('canvas'); c.width = c.height = size;
+            const ctx = c.getContext('2d');
+            const g = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+            g.addColorStop(0, inner); g.addColorStop(1, outer);
+            ctx.fillStyle = g; ctx.fillRect(0, 0, size, size);
+            const t = new THREE.CanvasTexture(c); t.needsUpdate = true; return t;
           },
           tick() {
-            for (const p of this.particles) {
-              p.y -= p.speed;
-              if (p.y < 0) p.y = Math.random() * 0.5 + 1.5;
-              p.el.setAttribute('position', `${p.x} ${p.y} ${p.z}`);
+            const cam = this.el.sceneEl.camera;
+            if (cam && this.sun) {
+              this.sun.lookAt(cam.getWorldPosition(new THREE.Vector3()));
             }
+          },
+          mood(color, intensity) {
+            this.light.color.set(color);
+            this.light.intensity = intensity;
+            if (this.sun) this.sun.material.color.set(color);
           }
+        });
+
+        // --- additive bloom sprite (billboarded) ---
+        AFRAME.registerComponent('bloom-sprite', {
+          schema: {
+            size: { type: 'number', default: 0.3 },
+            color: { type: 'color', default: '#fff1b0' }
+          },
+          init() {
+            const c = document.createElement('canvas'); c.width = c.height = 128;
+            const ctx = c.getContext('2d');
+            const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+            g.addColorStop(0, 'rgba(255,255,255,0.9)');
+            g.addColorStop(0.4, 'rgba(255,230,180,0.4)');
+            g.addColorStop(1, 'rgba(255,180,80,0)');
+            ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128);
+            const tex = new THREE.CanvasTexture(c); tex.needsUpdate = true;
+            const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, color: new THREE.Color(this.data.color) });
+            const sprite = new THREE.Sprite(mat);
+            sprite.scale.setScalar(this.data.size);
+            this.el.setObject3D('bloom', sprite);
+          }
+        });
+
+        // --- god rays: instanced additive slabs with noise shader ---
+        AFRAME.registerComponent('god-rays', {
+          schema: {
+            count: { type: 'int', default: 32 },
+            color: { type: 'color', default: '#ffe4a8' }
+          },
+          init() {
+            const isVisionPro = /visionOS|AppleWebKit.*XR/i.test(navigator.userAgent);
+            const count = isVisionPro ? Math.floor(this.data.count * 0.6) : this.data.count;
+            const sunDir = (this.el.sceneEl.sunDir || new THREE.Vector3(-0.35, 0.65, -0.8).normalize()).clone();
+
+            const geo = new THREE.PlaneGeometry(0.35, 8);
+            const mat = new THREE.ShaderMaterial({
+              transparent: true,
+              depthWrite: false,
+              blending: THREE.AdditiveBlending,
+              side: THREE.DoubleSide,
+              uniforms: {
+                uTime: { value: 0 },
+                uColor: { value: new THREE.Color(this.data.color) }
+              },
+              vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                  vUv = uv;
+                  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }`,
+              fragmentShader: `
+                varying vec2 vUv;
+                uniform float uTime;
+                uniform vec3 uColor;
+                float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+                float vnoise(vec2 p) {
+                  vec2 i = floor(p); vec2 f = fract(p); f = f*f*(3.0-2.0*f);
+                  return mix(mix(hash(i), hash(i+vec2(1,0)), f.x),
+                             mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), f.x), f.y);
+                }
+                void main() {
+                  float n = vnoise(vec2(vUv.x * 3.0, vUv.y * 1.5 - uTime * 0.25));
+                  n = smoothstep(0.35, 1.0, n);
+                  float edge = smoothstep(0.0, 0.2, vUv.x) * smoothstep(0.0, 0.2, 1.0 - vUv.x);
+                  float fade = smoothstep(0.0, 0.25, vUv.y) * smoothstep(0.0, 0.4, 1.0 - vUv.y);
+                  float a = n * edge * fade * 0.22;
+                  gl_FragColor = vec4(uColor, a);
+                }`
+            });
+
+            const mesh = new THREE.InstancedMesh(geo, mat, count);
+            mesh.frustumCulled = false;
+            const dummy = new THREE.Object3D();
+
+            // Build an orthonormal basis around sun direction
+            const up = Math.abs(sunDir.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+            const perpA = new THREE.Vector3().crossVectors(sunDir, up).normalize();
+            const perpB = new THREE.Vector3().crossVectors(sunDir, perpA).normalize();
+            const sunPos = sunDir.clone().multiplyScalar(4);
+
+            for (let i = 0; i < count; i++) {
+              const a = Math.random() * Math.PI * 2;
+              const r = Math.random() * 1.6;
+              dummy.position.copy(sunPos);
+              dummy.position.add(perpA.clone().multiplyScalar(Math.cos(a) * r));
+              dummy.position.add(perpB.clone().multiplyScalar(Math.sin(a) * r));
+              dummy.position.add(sunDir.clone().multiplyScalar(-Math.random() * 2.5));
+              dummy.lookAt(dummy.position.clone().add(sunDir));
+              dummy.rotateZ(Math.random() * Math.PI);
+              dummy.scale.set(0.3 + Math.random() * 0.4, 1.2 + Math.random() * 2.0, 1);
+              dummy.updateMatrix();
+              mesh.setMatrixAt(i, dummy.matrix);
+            }
+            mesh.instanceMatrix.needsUpdate = true;
+
+            this.mesh = mesh;
+            this.mat = mat;
+            this.el.setObject3D('godrays', mesh);
+          },
+          tick(t, dt) { if (this.mat) this.mat.uniforms.uTime.value += dt / 1000; }
+        });
+
+        // --- dust field: instanced particles catching the sun ---
+        AFRAME.registerComponent('dust-field', {
+          schema: {
+            count: { type: 'int', default: 700 },
+            radius: { type: 'number', default: 4 }
+          },
+          init() {
+            const scene = this.el.sceneEl;
+            const isVisionPro = /visionOS|AppleWebKit.*XR/i.test(navigator.userAgent);
+            const baseCount = isVisionPro ? Math.floor(this.data.count * 0.55) : this.data.count;
+            const sunDir = (scene.sunDir || new THREE.Vector3(-0.35, 0.65, -0.8).normalize()).clone();
+
+            const geo = new THREE.PlaneGeometry(0.04, 0.04);
+            const phases = new Float32Array(baseCount);
+            for (let i = 0; i < baseCount; i++) phases[i] = Math.random();
+            geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phases, 1));
+
+            const mat = new THREE.ShaderMaterial({
+              transparent: true,
+              depthWrite: false,
+              blending: THREE.AdditiveBlending,
+              uniforms: {
+                uTime: { value: 0 },
+                uSunDir: { value: sunDir }
+              },
+              vertexShader: `
+                uniform float uTime;
+                attribute float aPhase;
+                varying vec2 vUv;
+                varying vec3 vViewDir;
+                void main() {
+                  vUv = uv;
+                  float t = uTime + aPhase * 6.283;
+                  vec3 bob = vec3(sin(t * 0.7) * 0.04, cos(t * 0.5) * 0.05, sin(t * 0.6) * 0.04);
+                  vec4 mv = instanceMatrix * vec4(position, 1.0);
+                  mv.xyz += bob;
+                  vec4 world = modelMatrix * mv;
+                  vViewDir = normalize(cameraPosition - world.xyz);
+                  // Billboard: cancel view rotation so quad always faces camera
+                  vec4 mvPos = viewMatrix * world;
+                  mvPos.xy += position.xy;
+                  gl_Position = projectionMatrix * mvPos;
+                }`,
+              fragmentShader: `
+                varying vec2 vUv;
+                varying vec3 vViewDir;
+                uniform vec3 uSunDir;
+                void main() {
+                  vec2 d = vUv - vec2(0.5);
+                  float r = dot(d, d) * 4.0;
+                  float shape = smoothstep(1.0, 0.0, r);
+                  float glint = max(0.0, dot(vViewDir, -uSunDir));
+                  glint = pow(glint, 4.0);
+                  float a = shape * (0.06 + glint * 0.9);
+                  gl_FragColor = vec4(1.0, 0.94, 0.82, a);
+                }`
+            });
+
+            const mesh = new THREE.InstancedMesh(geo, mat, baseCount);
+            mesh.frustumCulled = false;
+            const dummy = new THREE.Object3D();
+            for (let i = 0; i < baseCount; i++) {
+              const r = Math.pow(Math.random(), 0.55) * this.data.radius;
+              const theta = Math.random() * Math.PI * 2;
+              const y = 0.2 + Math.random() * 3.2;
+              dummy.position.set(Math.cos(theta) * r, y, Math.sin(theta) * r - 1.5);
+              dummy.scale.setScalar(0.5 + Math.random() * 1.6);
+              dummy.updateMatrix();
+              mesh.setMatrixAt(i, dummy.matrix);
+            }
+            mesh.instanceMatrix.needsUpdate = true;
+
+            this.mesh = mesh;
+            this.mat = mat;
+            this.el.setObject3D('dust', mesh);
+          },
+          tick(t, dt) { if (this.mat) this.mat.uniforms.uTime.value += dt / 1000; }
+        });
+
+        // --- tree-loader: primitive fallback when GLB 404s ---
+        AFRAME.registerComponent('tree-loader', {
+          init() {
+            this.el.addEventListener('model-error', () => {
+              this.el.setAttribute('visible', 'false');
+              const prim = document.getElementById('tree-primitive');
+              if (prim) prim.setAttribute('visible', 'true');
+              console.warn('[bonsai] bonsai.glb missing — using primitive fallback');
+            });
+            this.el.addEventListener('model-loaded', () => {
+              this.el.object3D.traverse(o => {
+                if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
+              });
+            });
+          }
+        });
+
+        // --- wire XR panel clicks + weather-driven mood swap ---
+        const scene = sceneEl();
+        const applyMood = (weather) => {
+          const sky = scene.querySelector('[gradient-sky]')?.components['gradient-sky'];
+          const sun = scene.querySelector('[sun-rig]')?.components['sun-rig'];
+          if (!sky || !sun) return;
+          if (weather === 'sun')  { sky.tint('#3a4f78', '#e7b77a'); sun.mood('#ffd7a0', 3.0); scene.setAttribute('fog', 'color: #b8a88e; density: 0.035'); }
+          if (weather === 'rain') { sky.tint('#2a2e36', '#6a6b70'); sun.mood('#b0b8c0', 0.7); scene.setAttribute('fog', 'color: #4a505a; density: 0.12'); }
+          if (weather === 'snow') { sky.tint('#5a6e8a', '#c6d4e2'); sun.mood('#e8ecf5', 1.4); scene.setAttribute('fog', 'color: #b6c3d0; density: 0.08'); }
+        };
+        scene.addEventListener('loaded', () => {
+          applyMood(state.current);
+          scene.addEventListener('weatherchanged', (ev) => applyMood(ev.detail.weather));
+          scene.querySelectorAll('.xr-clickable').forEach(el => {
+            el.addEventListener('click', () => setWeather(el.dataset.weather));
+          });
         });
       }
     </script>
