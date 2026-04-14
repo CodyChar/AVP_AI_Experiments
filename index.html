@@ -73,13 +73,43 @@
         font-size: 13px; line-height: 1.4; margin-top: 16px;
       }
 
-      /* A-Frame scene is the primary inline preview on every platform so
-         the shader effects are visible in-page on Vision Pro too. The
-         <model> element is still loaded for AR Quick Look (the 'Place
-         in your room' button uses the USDZ via rel="ar"), but hidden
-         from inline layout. */
+      /* Two inline views — the <model> element (stereoscopic USDZ,
+         composited into passthrough on Vision Pro) and the A-Frame
+         canvas (WebGL with shader effects). A view toggle in the
+         panel switches between them. Desktop browsers don't support
+         <model>, so they are pinned to Effects. */
       #garden-scene-wrap { width: 100%; height: 100%; }
-      #model-slot > model { display: none; }
+      #model-slot > model { width: 100%; height: 100%; }
+
+      html:not(.view-spatial) #model-slot > model { display: none; }
+      html.view-spatial #garden-scene-wrap { display: none; }
+
+      .view-toggle {
+        display: flex;
+        gap: 4px;
+        padding: 4px;
+        border-radius: 12px;
+        background: color-mix(in srgb, Canvas 85%, CanvasText 10%);
+        margin-bottom: 12px;
+      }
+      .view-toggle button {
+        flex: 1;
+        padding: 8px 10px;
+        font-size: 13px;
+        border-radius: 8px;
+        border: 0;
+        background: transparent;
+        color: CanvasText;
+        cursor: pointer;
+      }
+      .view-toggle button[aria-pressed="true"] {
+        background: color-mix(in srgb, Canvas 100%, transparent);
+        font-weight: 600;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+      }
+      /* Hide the Spatial tab on browsers that can't render <model>. */
+      html:not(.supports-model) .view-toggle button[data-view="spatial"] { display: none; }
+      html:not(.supports-model) .view-toggle { display: none; }
     </style>
   </head>
   <body>
@@ -190,6 +220,10 @@
       </div>
 
       <aside id="panel">
+        <div class="view-toggle" role="tablist" aria-label="View">
+          <button data-view="spatial" aria-pressed="true">Spatial</button>
+          <button data-view="effects" aria-pressed="false">Effects</button>
+        </div>
         <h1>Forecast</h1>
         <button class="weather-btn" data-weather="sun" aria-pressed="true">☀︎ Sunny</button>
         <button class="weather-btn" data-weather="rain" aria-pressed="false">☂ Rainy</button>
@@ -208,7 +242,7 @@
           Drop a <code>bonsai.usdz</code> next to <code>index.html</code> to see the spatial bonsai on visionOS.
         </div>
 
-        <div id="build-stamp">Build 2026-04-14 19:00 UTC</div>
+        <div id="build-stamp">Build 2026-04-14 19:02 UTC</div>
       </aside>
     </div>
 
@@ -216,6 +250,25 @@
       // ---- feature detect <model> ----
       const supportsModel = typeof HTMLModelElement !== 'undefined';
       if (supportsModel) document.documentElement.classList.add('supports-model');
+
+      // ---- view toggle: Spatial (<model>) vs Effects (A-Frame) ----
+      // Default to Spatial when <model> works (Vision Pro), else Effects.
+      function setView(name) {
+        document.documentElement.classList.toggle('view-spatial', name === 'spatial');
+        document.querySelectorAll('.view-toggle button').forEach(b => {
+          b.setAttribute('aria-pressed', b.dataset.view === name ? 'true' : 'false');
+        });
+        // A-Frame's canvas needs a resize nudge if it was hidden while mounting.
+        if (name === 'effects') {
+          const s = document.getElementById('garden-scene');
+          if (s && s.resize) requestAnimationFrame(() => s.resize());
+          else window.dispatchEvent(new Event('resize'));
+        }
+      }
+      document.querySelectorAll('.view-toggle button').forEach(b => {
+        b.addEventListener('click', () => setView(b.dataset.view));
+      });
+      setView(supportsModel ? 'spatial' : 'effects');
 
       const bonsaiModel = document.getElementById('bonsai');
       const notice = document.getElementById('fallback-notice');
