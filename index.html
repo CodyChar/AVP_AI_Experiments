@@ -3,14 +3,27 @@
   <head>
     <meta charset="utf-8">
     <title>VisionOS Bonsai Weather App</title>
-    <!-- A-Frame 1.5.0 includes excellent WebXR and Apple Vision Pro input support -->
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
     <script>
-      // 1. Particle System for Rain and Snow
+      // 1. Hide the sky when entering Passthrough AR
+      AFRAME.registerComponent('hide-on-enter-ar', {
+        init: function () {
+          this.el.sceneEl.addEventListener('enter-vr', () => {
+            if (this.el.sceneEl.is('ar-mode')) {
+              this.el.setAttribute('visible', 'false');
+            }
+          });
+          this.el.sceneEl.addEventListener('exit-vr', () => {
+            this.el.setAttribute('visible', 'true');
+          });
+        }
+      });
+
+      // 2. Particle System for Rain and Snow
       AFRAME.registerComponent('weather-particles', {
         schema: {
-          type: { type: 'string', default: 'rain' }, // 'rain' or 'snow'
+          type: { type: 'string', default: 'rain' },
           count: { type: 'int', default: 100 }
         },
         init: function() {
@@ -19,7 +32,6 @@
             let p = document.createElement('a-entity');
             let isRain = this.data.type === 'rain';
             
-            // Shape the particle based on weather type
             p.setAttribute('geometry', isRain ? 'primitive: box; width: 0.005; height: 0.04; depth: 0.005' : 'primitive: sphere; radius: 0.015');
             p.setAttribute('material', isRain ? 'color: #4CC3D9; shader: flat; transparent: true; opacity: 0.7' : 'color: #FFFFFF; shader: flat');
             
@@ -27,9 +39,9 @@
             
             this.particles.push({
               el: p,
-              x: (Math.random() - 0.5) * 1.2, // Spread width
-              y: Math.random() * 1.5 + 0.5,   // Start height
-              z: (Math.random() - 0.5) * 1.2, // Spread depth
+              x: (Math.random() - 0.5) * 1.2,
+              y: Math.random() * 1.5 + 0.5,
+              z: (Math.random() - 0.5) * 1.2,
               speed: isRain ? Math.random() * 0.04 + 0.03 : Math.random() * 0.005 + 0.005
             });
           }
@@ -38,24 +50,21 @@
           for (let i = 0; i < this.data.count; i++) {
             let p = this.particles[i];
             p.y -= p.speed;
-            if (p.y < 0) p.y = Math.random() * 0.5 + 1.5; // Reset to top when hitting the bottom
+            if (p.y < 0) p.y = Math.random() * 0.5 + 1.5; 
             p.el.setAttribute('position', `${p.x} ${p.y} ${p.z}`);
           }
         }
       });
 
-      // 2. Weather Manager to handle state
+      // 3. Weather Manager to handle state
       AFRAME.registerComponent('weather-manager', {
         schema: { current: { type: 'string', default: 'sun' } },
         update: function() {
           const state = this.data.current;
-          
-          // Hide all weather elements
           document.getElementById('weather-sun').setAttribute('visible', 'false');
           document.getElementById('weather-rain').setAttribute('visible', 'false');
           document.getElementById('weather-snow').setAttribute('visible', 'false');
 
-          // Show selected
           if (state === 'sun') {
             document.getElementById('weather-sun').setAttribute('visible', 'true');
           } else if (state === 'rain') {
@@ -66,16 +75,14 @@
         }
       });
 
-      // 3. UI Button Interaction mapping Vision Pro Gaze + Pinch
+      // 4. UI Button Interaction mapping Vision Pro Gaze + Pinch
       AFRAME.registerComponent('weather-button', {
         schema: { type: 'string' },
         init: function () {
-          // 'click' maps to the Vision Pro Pinch when gaze is on the object
           this.el.addEventListener('click', () => {
             document.getElementById('scene-manager').setAttribute('weather-manager', 'current', this.data);
           });
           
-          // Hover states provide vital visual feedback for Vision Pro eye-tracking
           this.el.addEventListener('mouseenter', () => {
             this.el.setAttribute('material', 'color', '#d3d3d3');
             this.el.setAttribute('scale', '1.05 1.05 1.05');
@@ -89,15 +96,16 @@
     </script>
   </head>
   <body>
-    <!-- Enable immersive-ar so the bonsai sits in your physical room -->
-    <a-scene webxr="optionalFeatures: hit-test, local-floor;" background="color: #87CEEB">
+    <!-- Forces AR Mode and Hides the VR Button entirely -->
+    <a-scene 
+      webxr="optionalFeatures: hit-test, local-floor;" 
+      xr-mode-ui="enterVREnabled: false; enterAREnabled: true">
       
-      <!-- VISION PRO INPUT SETUP: Handles eye-gaze targeting + pinch to click -->
+      <!-- Sky is blue in 2D Safari, but disappears instantly in Passthrough AR -->
+      <a-sky id="sky" color="#87CEEB" hide-on-enter-ar></a-sky>
+
+      <!-- STRICT VISION PRO INPUT: Maps eye-gaze and hand pinch directly -->
       <a-entity cursor="rayOrigin: xr" raycaster="objects: .clickable"></a-entity>
-      <!-- Desktop fallback for testing -->
-      <a-entity camera position="0 1.5 1">
-        <a-entity cursor="rayOrigin: mouse" raycaster="objects: .clickable"></a-entity>
-      </a-entity>
 
       <!-- Manage Weather State -->
       <a-entity id="scene-manager" weather-manager="current: sun"></a-entity>
@@ -106,22 +114,16 @@
       <a-light type="ambient" color="#FFF" intensity="0.6"></a-light>
       <a-light type="directional" color="#FFF" intensity="0.8" position="-1 2 1"></a-light>
 
-      <!-- Main Anchor (Places the experience 1 meter in front of the user) -->
+      <!-- Main Anchor (Places the experience 1.2 meters in front of you) -->
       <a-entity position="0 0.8 -1.2">
         
         <!-- 3D BONSAI TREE -->
-        <!-- Note: Swap this <a-entity> out with <a-gltf-model src="your-model.glb"> if you have a custom 3D file -->
         <a-entity id="bonsai-tree">
-          <!-- Pot -->
           <a-cylinder radius="0.3" height="0.1" color="#2c3e50" position="0 0 0"></a-cylinder>
           <a-cylinder radius="0.28" height="0.12" color="#34495e" position="0 0.02 0"></a-cylinder>
-          <!-- Soil -->
           <a-cylinder radius="0.27" height="0.13" color="#3e2723" position="0 0.03 0"></a-cylinder>
-          <!-- Trunk -->
           <a-cylinder radius="0.04" height="0.5" color="#5d4037" position="0 0.25 0"></a-cylinder>
-          <!-- Branch 1 -->
           <a-cylinder radius="0.025" height="0.3" color="#5d4037" position="0.1 0.4 0" rotation="0 0 -45"></a-cylinder>
-          <!-- Leaves -->
           <a-sphere radius="0.25" color="#2e7d32" position="0 0.6 0" scale="1 0.6 1" material="roughness: 0.8"></a-sphere>
           <a-sphere radius="0.2" color="#388e3c" position="0.18 0.5 0" scale="1 0.5 1" material="roughness: 0.8"></a-sphere>
           <a-sphere radius="0.18" color="#2e7d32" position="-0.15 0.45 0" scale="1 0.5 1" material="roughness: 0.8"></a-sphere>
@@ -129,57 +131,41 @@
 
         <!-- WEATHER EFFECTS CONTAINER -->
         <a-entity id="weather-container" position="0 1 0">
-          
-          <!-- Sun Weather -->
           <a-entity id="weather-sun" visible="true">
-            <!-- Glowing Sun -->
             <a-sphere radius="0.15" color="#FFD700" position="0.5 0.5 0" material="emissive: #FFD700; emissiveIntensity: 1; shader: flat"></a-sphere>
             <a-light type="point" color="#FFD700" intensity="1.5" position="0.5 0.5 0"></a-light>
           </a-entity>
-
-          <!-- Rain Weather -->
           <a-entity id="weather-rain" visible="false">
-            <!-- Dark Cloud -->
             <a-entity position="0 0.6 0">
               <a-sphere radius="0.2" color="#7f8c8d" position="0 0 0" material="shader: flat"></a-sphere>
               <a-sphere radius="0.15" color="#7f8c8d" position="-0.15 -0.05 0.1" material="shader: flat"></a-sphere>
               <a-sphere radius="0.18" color="#7f8c8d" position="0.15 -0.02 -0.05" material="shader: flat"></a-sphere>
             </a-entity>
-            <!-- Rain Particles -->
             <a-entity weather-particles="type: rain; count: 80"></a-entity>
           </a-entity>
-
-          <!-- Snow Weather -->
           <a-entity id="weather-snow" visible="false">
-            <!-- White Cloud -->
             <a-entity position="0 0.6 0">
               <a-sphere radius="0.2" color="#ffffff" position="0 0 0" material="shader: flat"></a-sphere>
               <a-sphere radius="0.15" color="#ffffff" position="-0.15 -0.05 0.1" material="shader: flat"></a-sphere>
               <a-sphere radius="0.18" color="#ffffff" position="0.15 -0.02 -0.05" material="shader: flat"></a-sphere>
             </a-entity>
-            <!-- Snow Particles -->
             <a-entity weather-particles="type: snow; count: 60"></a-entity>
           </a-entity>
-          
         </a-entity>
 
         <!-- FLOATING UI DASHBOARD -->
         <a-entity position="-0.6 0.5 0" rotation="0 15 0">
           <a-plane width="0.4" height="0.6" color="#2c3e50" material="opacity: 0.8; transparent: true" position="0 0 -0.01" rounded="radius: 0.05"></a-plane>
-          
           <a-text value="Forecast" color="#FFF" align="center" position="0 0.22 0" scale="0.4 0.4 0.4"></a-text>
 
-          <!-- Sun Button -->
           <a-plane class="clickable" weather-button="sun" width="0.25" height="0.08" color="#ffffff" position="0 0.08 0.01">
             <a-text value="Sunny" color="#333" align="center" scale="0.3 0.3 0.3"></a-text>
           </a-plane>
 
-          <!-- Rain Button -->
           <a-plane class="clickable" weather-button="rain" width="0.25" height="0.08" color="#ffffff" position="0 -0.04 0.01">
             <a-text value="Rainy" color="#333" align="center" scale="0.3 0.3 0.3"></a-text>
           </a-plane>
 
-          <!-- Snow Button -->
           <a-plane class="clickable" weather-button="snow" width="0.25" height="0.08" color="#ffffff" position="0 -0.16 0.01">
             <a-text value="Snowy" color="#333" align="center" scale="0.3 0.3 0.3"></a-text>
           </a-plane>
@@ -189,4 +175,3 @@
     </a-scene>
   </body>
 </html>
- 
