@@ -126,6 +126,15 @@
         <button class="weather-btn" data-weather="sun" aria-pressed="true">☀︎ Sunny</button>
         <button class="weather-btn" data-weather="rain" aria-pressed="false">☂ Rainy</button>
         <button class="weather-btn" data-weather="snow" aria-pressed="false">❄ Snowy</button>
+
+        <!-- AR Quick Look: tapping opens the USDZ in visionOS's system
+             3D viewer, letting the user place it on a real surface.
+             The href is kept in sync with the current weather variant. -->
+        <a id="place-in-room" class="weather-btn" rel="ar" href="./bonsai.usdz">
+          <img alt="" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg'/>" style="display:none">
+          Place in your room
+        </a>
+
         <div id="fallback-notice" hidden>
           Drop a <code>bonsai.usdz</code> next to <code>index.html</code> to see the spatial bonsai. On visionOS 26+ it will float in your room.
         </div>
@@ -156,19 +165,23 @@
           b.setAttribute('aria-pressed', b.dataset.weather === next ? 'true' : 'false');
         });
 
+        // Point AR Quick Look at the base bonsai; will upgrade to the
+        // weather variant below if it exists on the server.
+        const placeLink = document.getElementById('place-in-room');
+        if (placeLink) placeLink.href = './bonsai.usdz';
+
         // <model>: swap to a per-weather USDZ variant if present.
         // Authoring tip: export bonsai-sun.usdz / bonsai-rain.usdz / bonsai-snow.usdz
         // from Reality Composer Pro with matching animation timelines.
-        if (supportsModel && bonsai) {
-          const source = bonsai.querySelector('source');
-          if (source) {
-            const variant = `./bonsai-${next}.usdz`;
-            // Only swap if the variant file exists — otherwise keep the base.
-            fetch(variant, { method: 'HEAD' }).then(r => {
-              if (r.ok) { source.src = variant; bonsai.load?.(); }
-            }).catch(() => {});
+        const variant = `./bonsai-${next}.usdz`;
+        fetch(variant, { method: 'HEAD' }).then(r => {
+          if (!r.ok) return;
+          if (placeLink) placeLink.href = variant;
+          if (supportsModel && bonsai) {
+            const source = bonsai.querySelector('source');
+            if (source) { source.src = variant; bonsai.load?.(); }
           }
-        }
+        }).catch(() => {});
 
         // A-Frame fallback: toggle visibility of weather groups.
         ['sun', 'rain', 'snow'].forEach(w => {
