@@ -73,12 +73,13 @@
         font-size: 13px; line-height: 1.4; margin-top: 16px;
       }
 
-      /* A-Frame scene lives in the DOM for WebXR, but is hidden when
-         <model> is available (Vision Pro). On non-model browsers, the
-         scene becomes the inline preview. */
+      /* A-Frame scene is the primary inline preview on every platform so
+         the shader effects are visible in-page on Vision Pro too. The
+         <model> element is still loaded for AR Quick Look (the 'Place
+         in your room' button uses the USDZ via rel="ar"), but hidden
+         from inline layout. */
       #garden-scene-wrap { width: 100%; height: 100%; }
-      html.supports-model #garden-scene-wrap { display: none; }
-      html:not(.supports-model) #model-slot > model { display: none; }
+      #model-slot > model { display: none; }
     </style>
   </head>
   <body>
@@ -96,6 +97,7 @@
             renderer-tuning
             renderer="colorManagement: true; physicallyCorrectLights: true; toneMapping: ACESFilmic; antialias: true; foveationLevel: 1; highRefreshRate: true"
             fog="type: exponential; color: #b8a88e; density: 0.035"
+            webxr="optionalFeatures: local-floor, bounded-floor, hand-tracking"
             xr-mode-ui="enterVREnabled: false; enterAREnabled: false"
             background="color: #1e1a24"
           >
@@ -198,7 +200,7 @@
           Drop a <code>bonsai.usdz</code> next to <code>index.html</code> to see the spatial bonsai on visionOS.
         </div>
 
-        <div id="build-stamp">Build 2026-04-14 18:21 UTC</div>
+        <div id="build-stamp">Build 2026-04-14 18:55 UTC</div>
       </aside>
     </div>
 
