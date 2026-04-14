@@ -6,13 +6,12 @@
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
     <script>
-      // 1. Hide the sky when entering Passthrough AR
-      AFRAME.registerComponent('hide-on-enter-ar', {
+      // 1. Hide the sky whenever we enter an immersive XR session
+      //    (Vision Pro Safari enters vr-mode; passthrough is the default blend)
+      AFRAME.registerComponent('hide-on-enter-xr', {
         init: function () {
           this.el.sceneEl.addEventListener('enter-vr', () => {
-            if (this.el.sceneEl.is('ar-mode')) {
-              this.el.setAttribute('visible', 'false');
-            }
+            this.el.setAttribute('visible', 'false');
           });
           this.el.sceneEl.addEventListener('exit-vr', () => {
             this.el.setAttribute('visible', 'true');
@@ -96,13 +95,17 @@
     </script>
   </head>
   <body>
-    <!-- Forces AR Mode and Hides the VR Button entirely -->
-    <a-scene 
-      webxr="optionalFeatures: hit-test, local-floor;" 
-      xr-mode-ui="enterVREnabled: false; enterAREnabled: true">
-      
-      <!-- Sky is blue in 2D Safari, but disappears instantly in Passthrough AR -->
-      <a-sky id="sky" color="#87CEEB" hide-on-enter-ar></a-sky>
+    <!-- Vision Pro Safari only exposes immersive-vr; passthrough is the
+         default environment blend. alpha:true lets the passthrough feed
+         show through instead of the renderer's clear color. -->
+    <a-scene
+      renderer="alpha: true; colorManagement: true; antialias: true"
+      background="transparent: true"
+      webxr="optionalFeatures: local-floor, bounded-floor, hand-tracking;"
+      xr-mode-ui="enterVREnabled: true; enterAREnabled: false">
+
+      <!-- Sky is blue in 2D Safari, hidden on enter-vr so passthrough shows -->
+      <a-sky id="sky" color="#87CEEB" hide-on-enter-xr></a-sky>
 
       <!-- STRICT VISION PRO INPUT: Maps eye-gaze and hand pinch directly -->
       <a-entity cursor="rayOrigin: xr" raycaster="objects: .clickable"></a-entity>
